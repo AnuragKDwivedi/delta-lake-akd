@@ -330,13 +330,7 @@ class DeltaInsertIntoSQLSuite
           .format("delta")
           .insertInto(tableName)
       }
-      checkErrorMatchPVals(
-        exception = err,
-        "_LEGACY_ERROR_TEMP_DELTA_0007",
-        parameters = Map(
-          "message" -> "A schema mismatch detected when writing to the Delta table(.|\\n)*"
-        )
-      )
+      checkError(err, "DELTA_METADATA_MISMATCH", "42KDG", Map.empty[String, String])
 
       // insert data with schema evolution
       withSQLConf("spark.databricks.delta.schema.autoMerge.enabled" -> "true") {
@@ -407,13 +401,7 @@ class DeltaInsertIntoSQLSuite
       val e = intercept[AnalysisException] {
         sql("INSERT INTO target SELECT * FROM source")
       }
-      checkErrorMatchPVals(
-        exception = e,
-        "_LEGACY_ERROR_TEMP_DELTA_0007",
-        parameters = Map(
-          "message" -> "A schema mismatch detected when writing to the Delta table(.|\\n)*"
-        )
-      )
+      checkError(e, "DELTA_METADATA_MISMATCH", "42KDG", Map.empty[String, String])
 
       withSQLConf(DeltaSQLConf.DELTA_SCHEMA_AUTO_MIGRATE.key -> "true") {
         sql("INSERT INTO target SELECT * FROM source")
@@ -448,13 +436,7 @@ class DeltaInsertIntoSQLSuite
       val e = intercept[AnalysisException] {
         sql("INSERT INTO target SELECT * FROM source")
       }
-      checkErrorMatchPVals(
-        exception = e,
-        "_LEGACY_ERROR_TEMP_DELTA_0007",
-        parameters = Map(
-          "message" -> "A schema mismatch detected when writing to the Delta table(.|\\n)*"
-        )
-      )
+      checkError(e, "DELTA_METADATA_MISMATCH", "42KDG", Map.empty[String, String])
 
       withSQLConf(DeltaSQLConf.DELTA_SCHEMA_AUTO_MIGRATE.key -> "true") {
         sql("INSERT INTO target SELECT * FROM source")
@@ -1576,6 +1558,24 @@ abstract class DeltaInsertIntoTests(
         sql(s"SELECT data FROM $t1 where ts = timestamp'2025-11-26 04:00:00.123456'"), Seq(Row(6)))
 
       checkAnswer(sql(s"SELECT count(distinct(ts)) from $t1"), Seq(Row(6)))
+    }
+  }
+
+  // FIXME: Documenting existing behaviour. Fixing this should be a bugfix and not behavior change.
+  test("insertInto: __HIVE_DEFAULT_PARTITION__ results in null partition column") {
+    val t1 = "tbl"
+    withTable(t1) {
+      sql(s"CREATE TABLE $t1 (part string, data string) USING $v2Format PARTITIONED BY (part)")
+
+      // Insert with __HIVE_DEFAULT_PARTITION__ as partition value
+      // __HIVE_DEFAULT_PARTITION__ is a tombstone value for null partition column
+      sql(s"INSERT INTO $t1 VALUES ('__HIVE_DEFAULT_PARTITION__', 'test')")
+
+      // Verify that the partition column is null
+      checkAnswer(
+        sql(s"SELECT part, data FROM $t1"),
+        Seq(Row(null, "test"))
+      )
     }
   }
 
